@@ -2,6 +2,7 @@
 #include "dzcommon.h"
 #include "dzlog.h"
 #include "dzutil.h"
+#include "dzbroker.h"
 
 extern struct setting settings;
 
@@ -10,6 +11,26 @@ static void settings_init();
 static void settings_init() {
     strcpy(settings.log_name, "./log/test.log");
     settings.log = true;
+}
+
+void test_broker(int argc, char **argv) {
+    if (argc < 2) {
+        printf ("syntax: main me {you}...\n");
+        return;
+    }
+    const char *local = argv[1];
+    int rlen = argc - 2;
+    char **remote = (char **)malloc(rlen * sizeof(char *));
+    /*memcpy(remote, argv+2*sizeof(char *), rlen * sizeof(char *));*/
+    memcpy(remote, argv+2, rlen * sizeof(char *));
+
+    dz_broker *broker = dz_broker_new(local, remote, rlen);
+    dz_broker_sim_worker(broker, NBR_WORKERS);
+    dz_broker_sim_client(broker, NBR_CLIENTS);
+    dz_broker_main_loop(broker);
+
+    free(remote);
+    dz_broker_destory(&broker);
 }
 
 int main(int argc, char **argv) {
@@ -43,5 +64,7 @@ int main(int argc, char **argv) {
         }
         log_init();
     }
+
+    test_broker(argc, argv);
     LOG_PRINT(LOG_INFO, "main return %s", _init_path);
 }
