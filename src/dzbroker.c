@@ -1,7 +1,9 @@
 
 #include "dzbroker.h"
+#include "mdp_client.h"
 #include "dzlog.h"
 #include "dzcommon.h"
+#include "dzutil.h"
 
 struct _dz_broker {
     zctx_t *ctx;
@@ -81,17 +83,24 @@ dz_broker_destory(dz_broker **self_p) {
 }
 
 void
-dz_broker_sim_client(dz_broker *self, int client_num) {
+dz_broker_sim_client(dz_broker *self, int client_num, int verbose) {
     for (int i = 0; i < client_num; i++) {
-        bind_info binfo = {i, self->name};
-        zthread_new(client_task, &binfo);
+        const char *addr = self->name;
+        bind_info binfo = {i, addr, verbose};
+        // TODO: a strange segmentation fault bug
+        /*bind_info binfo = {i, self->name, verbose};*/
+        zthread_new(client_task_mdp, &binfo);
+        /*LOG_PRINT(LOG_DEBUG, "binfo:%d, %s, %d", binfo.nbr_id, binfo.bind_addr, binfo.verbose);*/
     }
 }
 
 void
-dz_broker_sim_worker(dz_broker *self, int worker_num) {
+dz_broker_sim_worker(dz_broker *self, int worker_num, int verbose) {
     for (int i = 0; i < worker_num; i++) {
-        bind_info binfo = {i, self->name};
+        const char *addr = self->name;
+        bind_info binfo = {i, addr, verbose};
+        // TODO: a strange segmentation fault bug
+        /*bind_info binfo = {i, self->name, verbose};*/
         zthread_new(worker_task, &binfo);
     }
 }
@@ -180,10 +189,10 @@ void dz_broker_main_loop(dz_broker *self) {
 
             if (secondary [0].revents & ZMQ_POLLIN)
                 msg = zmsg_recv(self->localfe);
-            else
-            if (secondary [1].revents & ZMQ_POLLIN)
+            else if (secondary [1].revents & ZMQ_POLLIN) {
                 msg = zmsg_recv(self->cloudfe);
-            else
+                LOG_PRINT(LOG_DEBUG, "GET msg from broker peer");
+            } else
                 break;      //  No work, go back to primary
 
             if (self->local_capacity) {
@@ -196,7 +205,11 @@ void dz_broker_main_loop(dz_broker *self) {
                 //  Route to random broker peer
                 int peer = randof(self->rlen);
                 zmsg_pushmem (msg, self->remote[peer], strlen(self->remote[peer]));
+
+                zmsg_log_dump(msg, "Route msg");
+
                 zmsg_send (&msg, self->cloudbe);
+                LOG_PRINT(LOG_DEBUG, "Route to random broker peer %s", self->remote[peer]);
             }
         }
         //  We broadcast capacity messages to other peers; to reduce chatter,
@@ -262,6 +275,65 @@ client_task (void *args)
 }
 
 void *
+client_task_mdp (void *args)
+{
+    bind_info *binfo = (bind_info *)args;
+    int client_id = binfo->nbr_id;
+    const char *bind_addr = binfo->bind_addr;
+    int verbose = binfo->verbose;
+
+    zctx_t *ctx = zctx_new();
+    char endpoint[256];
+    sprintf(endpoint, "ipc://%s-localfe.ipc", bind_addr);
+    mdp_client_t *mdp_client = mdp_client_new(endpoint, verbose);
+
+    while (true) {
+        sleep (randof (5));
+        int burst = randof (15);
+        while (burst--) {
+            zmsg_t *request = zmsg_new();
+            char task_id [5];
+            sprintf (task_id, "%04X", randof (0x10000));
+            zmsg_pushstr(request, task_id);
+
+            //  Send request with random hex ID
+            LOG_PRINT(LOG_INFO, "client-%d send %s", client_id, task_id);
+            mdp_client_send(mdp_client, "echo", &request);
+
+            /**
+            //  Wait max ten seconds for a reply, then complain
+            zmq_pollitem_t pollset [1] = { { mdp_client, 0, ZMQ_POLLIN, 0 } };
+            int rc = zmq_poll (pollset, 1, 1 * 1000 * ZMQ_POLL_MSEC);
+            if (rc == -1) {
+                LOG_PRINT(LOG_ERROR, "client-%d -recv Interrupted - lost task %s", client_id, task_id);
+                break;          //  Interrupted
+            }
+
+            if (pollset [0].revents & ZMQ_POLLIN) {
+                zmsg_t *reply = mdp_client_recv(mdp_client, NULL, NULL);
+                if (!reply) {
+                    LOG_PRINT(LOG_ERROR, "client-%d interrupted", client_id);
+                    break;              //  Interrupted
+                }
+                //  Worker is supposed to answer us with our task id
+                assert (streq (zmsg_popstr(reply), task_id));
+                LOG_PRINT(LOG_INFO, "client-%d work done and recv %s", client_id, reply);
+                zmsg_destroy(&reply);
+            }
+            else {
+                LOG_PRINT(LOG_ERROR, "client-%d E: CLIENT EXIT - lost task %s", client_id, task_id);
+                return NULL;
+            }
+            */
+            zmsg_t *reply = mdp_client_timeout_recv(mdp_client, NULL, NULL, client_id, task_id);
+            zmsg_destroy(&reply);
+        }
+    }
+    zctx_destroy (&ctx);
+    return NULL;
+}
+
+void *
 worker_task (void *args)
 {
     bind_info *binfo = (bind_info *)args;
@@ -301,5 +373,4 @@ worker_task (void *args)
     zctx_destroy (&ctx);
     return NULL;
 }
-
 

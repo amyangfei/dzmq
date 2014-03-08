@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <execinfo.h>
 #include "dzcommon.h"
 #include "dzlog.h"
 #include "dzutil.h"
@@ -13,7 +14,24 @@ static void settings_init() {
     settings.log = true;
 }
 
+void segfault_sigaction(int signal, siginfo_t *si, void *arg) {
+    printf("Caught segfault at address %p, signo %d, errno %d\n", si->si_addr, si->si_signo, si->si_errno);
+    void *array[20];
+    size_t size;
+
+    // get void*'s for all entries on the stack
+    size = backtrace(array, 20);
+
+    // print out all the frames to stderr
+    fprintf(stderr, "Error: signal %d:\n", signal);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+    exit(0);
+}
+
+
 void test_broker(int argc, char **argv) {
+    int verbose = 1;
     if (argc < 2) {
         printf ("syntax: main me {you}...\n");
         return;
@@ -25,8 +43,8 @@ void test_broker(int argc, char **argv) {
     memcpy(remote, argv+2, rlen * sizeof(char *));
 
     dz_broker *broker = dz_broker_new(local, remote, rlen);
-    dz_broker_sim_worker(broker, NBR_WORKERS);
-    dz_broker_sim_client(broker, NBR_CLIENTS);
+    dz_broker_sim_worker(broker, NBR_WORKERS, verbose);
+    dz_broker_sim_client(broker, NBR_CLIENTS, verbose);
     dz_broker_main_loop(broker);
 
     free(remote);
@@ -34,6 +52,13 @@ void test_broker(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(struct sigaction));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_sigaction = segfault_sigaction;
+    sa.sa_flags   = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+
     _init_path = getcwd(NULL, 0);
     settings_init();
 
