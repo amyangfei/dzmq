@@ -105,7 +105,7 @@ void s_mdp_worker_connect_to_broker (mdp_worker_t *self)
 //  Constructor
 
 mdp_worker_t *
-mdp_worker_new (char *broker,char *service, int verbose)
+mdp_worker_new (char *broker, char *service, int verbose)
 {
     assert (broker);
     assert (service);

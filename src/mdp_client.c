@@ -34,6 +34,7 @@ struct _mdp_client_t {
     zctx_t *ctx;                //  Our context
     char *broker;
     void *client;               //  Socket to broker
+    char *service_name;         //  Service name
     int verbose;                //  Print activity to stdout
     int timeout;                //  Request timeout
 };

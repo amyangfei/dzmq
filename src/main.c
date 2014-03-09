@@ -45,7 +45,7 @@ void test_broker(int argc, char **argv) {
     dz_broker *broker = dz_broker_new(local, remote, rlen);
     dz_broker_sim_worker(broker, NBR_WORKERS, verbose);
     dz_broker_sim_client(broker, NBR_CLIENTS, verbose);
-    dz_broker_main_loop(broker);
+    dz_broker_main_loop_mdp(broker);
 
     free(remote);
     dz_broker_destory(&broker);
