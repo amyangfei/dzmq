@@ -6,12 +6,6 @@
 #include "dzutil.h"
 #include "dzlog.h"
 
-//functions list
-int is_dir(const char *path);
-int mk_dir(const char *path);
-int mk_dirs(const char *dir);
-
-
 /**
  * @brief is_dir Check a path is a directory.
  *
@@ -102,3 +96,16 @@ int mk_dirs(const char *dir)
     return 1;
 }
 
+void zmsg_log_dump(zmsg_t *msg, const char *prefix) {
+    zmsg_t *debug_msg = zmsg_dup(msg);
+    int msglen = zmsg_size(debug_msg);
+    char msg_data[256];
+    for (int i = 0; i < msglen; i++){
+        char temp[10];
+        sprintf(temp, "%s-%d:", "frame", i);
+        strcat(msg_data, temp);
+        strcat(msg_data, zmsg_popstr(debug_msg));
+    }
+    LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, msg_data);
+    zmsg_destroy(&debug_msg);
+}
