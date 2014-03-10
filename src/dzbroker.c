@@ -348,6 +348,8 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         if (msg) {
             zmsg_send (&msg, self->localfe);
         }
+    } else if (zframe_streq(command, MDPW_HEARTBEAT)) {
+        worker->expiry = zclock_time() + HEARTBEAT_EXPIRY;
     } else if (zframe_streq(command, MDPW_DISCONNECT)) {
         s_broker_worker_delete(self, worker);
     } else {
