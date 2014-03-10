@@ -31,7 +31,7 @@ void segfault_sigaction(int signal, siginfo_t *si, void *arg) {
 
 
 void test_broker(int argc, char **argv) {
-    int verbose = 1;
+    int verbose = 0;
     if (argc < 2) {
         printf ("syntax: main me {you}...\n");
         return;

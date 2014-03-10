@@ -47,6 +47,7 @@ void s_mdp_client_connect_to_broker (mdp_client_t *self)
 {
     if (self->client)
         zsocket_destroy (self->ctx, self->client);
+    /*self->client = zsocket_new (self->ctx, ZMQ_REQ);*/
     self->client = zsocket_new (self->ctx, ZMQ_DEALER);
     zmq_connect (self->client, self->broker);
     if (self->verbose)
@@ -177,7 +178,6 @@ mdp_client_recv (mdp_client_t *self, char **command_p, char **service_p)
     //  Frame 5..n: Application frames
 
     //  We would handle malformed replies better in real code
-    zmsg_log_dump(msg, "CLIENT recv");
     assert (zmsg_size (msg) >= 5);
 
     zframe_t *empty = zmsg_pop (msg);
@@ -206,7 +206,7 @@ mdp_client_recv (mdp_client_t *self, char **command_p, char **service_p)
 zmsg_t *
 mdp_client_timeout_recv(mdp_client_t *self, char **command_p, char **service_p, int client_id, char *task_id) {
     zmq_pollitem_t pollset[1] = { { self->client, 0, ZMQ_POLLIN, 0 } };
-    int rc = zmq_poll (pollset, 1, 1 * 1000 * ZMQ_POLL_MSEC);
+    int rc = zmq_poll (pollset, 1, 3 * 1000 * ZMQ_POLL_MSEC);
     if (rc == -1) {
         LOG_PRINT(LOG_ERROR, "client-%d -recv Interrupted - lost task %s", client_id, task_id);
         /*break;          //  Interrupted*/
@@ -221,9 +221,8 @@ mdp_client_timeout_recv(mdp_client_t *self, char **command_p, char **service_p, 
             return NULL;
         }
         //  Worker is supposed to answer us with our task id
-        assert (streq (zmsg_popstr(reply), task_id));
-        LOG_PRINT(LOG_INFO, "client-%d work done and recv %s", client_id, reply);
-        /*zmsg_destroy(&reply);*/
+        /*assert (streq (zmsg_popstr(reply), task_id));*/
+        /*LOG_PRINT(LOG_INFO, "client-%d work done and recv %s", client_id);*/
         return reply;
     } else {
         LOG_PRINT(LOG_ERROR, "client-%d E: CLIENT EXIT - lost task %s", client_id, task_id);

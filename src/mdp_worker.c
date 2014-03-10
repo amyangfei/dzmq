@@ -24,6 +24,7 @@
 */
 
 #include "mdp_worker.h"
+#include "dzutil.h"
 
 //  Reliability parameters
 #define HEARTBEAT_LIVENESS  3       //  3-5 is reasonable
@@ -74,6 +75,7 @@ s_mdp_worker_send_to_broker (mdp_worker_t *self, char *command, char *option,
             mdpw_commands [(int) *command]);
         zmsg_dump (msg);
     }
+    zmsg_log_dump(msg, "------worker send msg to broker");
     zmsg_send (&msg, self->worker);
 }
 
@@ -247,9 +249,13 @@ mdp_worker_recv (mdp_worker_t *self, zframe_t **reply_to_p)
             if (zframe_streq (command, MDPW_REQUEST)) {
                 //  We should pop and save as many addresses as there are
                 //  up to a null part, but for now, just save one...
+
+                zframe_t *service = zmsg_pop(msg);
                 zframe_t *reply_to = zmsg_unwrap (msg);
-                if (reply_to_p)
+                if (reply_to_p) {
                     *reply_to_p = reply_to;
+                    zmsg_push(msg, service);
+                }
                 else
                     zframe_destroy (&reply_to);
 

@@ -177,8 +177,9 @@ void dz_broker_main_loop(dz_broker *self) {
             }
         }
         //  Route reply to client if we still need to
-        if (msg)
+        if (msg) {
             zmsg_send (&msg, self->localfe);
+        }
 
         //  .split handle state messages
         //  If we have input messages on our statefe sockets, we
@@ -226,8 +227,6 @@ void dz_broker_main_loop(dz_broker *self) {
                 //  Route to random broker peer
                 int peer = randof(self->rlen);
                 zmsg_pushmem (msg, self->remote[peer], strlen(self->remote[peer]));
-
-                zmsg_log_dump(msg, "Route msg");
 
                 zmsg_send (&msg, self->cloudbe);
                 LOG_PRINT(LOG_DEBUG, "Route to random broker peer %s", self->remote[peer]);
@@ -285,7 +284,6 @@ s_worker_require (dz_broker *self, zframe_t *address)
 }
 
 void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
-    zmsg_log_dump(msg, "handle worker msg");
     assert(zmsg_size(msg) >= 4);    // At least: identity, empty, header, command
     zframe_t *sender = zmsg_pop (msg);
     zframe_t *empty  = zmsg_pop (msg);
@@ -324,8 +322,9 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
     }  else if (zframe_streq(command, MDPW_REPORT)) {
         //  Remove & save client return envelope and insert the
         //  protocol header and service name, then rewrap envelope.
+        zmsg_log_dump(msg, "REPORT");
         zframe_t *client = zmsg_unwrap (msg);
-        zmsg_pushstr (msg, worker->service);
+        /*zmsg_pushstr (msg, worker->service);*/
         zmsg_pushstr (msg, MDPC_REPORT);
         zmsg_pushstr (msg, MDPC_CLIENT);
         zmsg_wrap (msg, client);
@@ -346,6 +345,7 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         }
         //  Route reply to client if we still need to
         if (msg) {
+            zmsg_print(msg);
             zmsg_send (&msg, self->localfe);
         }
     } else if (zframe_streq(command, MDPW_HEARTBEAT)) {
@@ -354,7 +354,6 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         s_broker_worker_delete(self, worker);
     } else {
         LOG_PRINT(LOG_ERROR, "invalid worker message");
-        zmsg_log_dump(msg, "invalid worker message");
     }
     zframe_destroy(&command);
     zmsg_destroy(&msg);
@@ -362,25 +361,34 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
 
 static void
 s_broker_client_msg(dz_broker *self, zmsg_t *msg) {
-    zmsg_log_dump(msg, "handle client msg:");
-    // At least: identity, empty, header, command, service_name, body
+    // At least: identity, empty, header, service_name, body
     assert (zmsg_size (msg) >= 5);
 
     zframe_t *sender = zmsg_pop (msg);
     zframe_t *empty  = zmsg_pop (msg);
     zframe_t *header = zmsg_pop (msg);
+    zframe_t *service = zmsg_pop (msg);
 
     // TODO: check whether service available
     if (self->local_capacity) {
+        zmsg_wrap(msg, sender);
+        /**
         zmsg_pushstr(msg, MDPW_REQUEST);
         zmsg_pushstr(msg, MDPW_WORKER);
+        */
 
+        zmsg_push(msg, service);
+        zmsg_pushstr(msg, MDPW_REQUEST);
+        zmsg_pushstr(msg, MDPW_WORKER);
         zframe_t *frame = (zframe_t *)zlist_pop(self->workers);
         zmsg_wrap (msg, frame);
+
         zmsg_send (&msg, self->localbe);
         self->local_capacity--;
     } else {
         //  Route to random broker peer
+        zmsg_wrap(msg, sender);
+        zmsg_push(msg, service);
         zmsg_pushstr(msg, MDPW_REQUEST);
         zmsg_pushstr(msg, MDPW_WORKER);
 
@@ -555,6 +563,7 @@ client_task_mdp (void *args)
             zmsg_t *request = zmsg_new();
             char task_id [5];
             sprintf (task_id, "%04X", randof (0x10000));
+            /*zmsg_pushstr(request, "data");*/
             zmsg_pushstr(request, task_id);
 
             //  Send request with random hex ID
@@ -564,6 +573,8 @@ client_task_mdp (void *args)
             zmsg_t *reply = mdp_client_timeout_recv(mdp_client, NULL, NULL, client_id, task_id);
             if (reply == NULL) {
                 break;
+            } else {
+                zmsg_log_dump(reply, "client recv back");
             }
             zmsg_destroy(&reply);
         }
@@ -595,7 +606,6 @@ worker_task (void *args)
 
         //  Workers are busy for 0/1 seconds
         sleep (randof (2));
-        /*zmsg_log_dump(msg, "worker recv msg");*/
         zmsg_send (&msg, worker);
         LOG_PRINT(LOG_INFO, "worker-%d done and send back", worker_id);
     }

@@ -96,16 +96,82 @@ int mk_dirs(const char *dir)
     return 1;
 }
 
+static char *
+get_zframe_str(zframe_t *self, const char *prefix) {
+    assert (self);
+    char *msg_data = (char *)malloc(256 * sizeof(char));
+    if (prefix)
+        strcat(msg_data, prefix);
+    byte *data = zframe_data (self);
+    size_t size = zframe_size (self);
+
+    int is_bin = 0;
+    uint char_nbr;
+    for (char_nbr = 0; char_nbr < size; char_nbr++)
+        if (data [char_nbr] < 9 || data [char_nbr] > 127)
+            is_bin = 1;
+
+    int len = snprintf(NULL, 0, "[%03d]", (int)size);
+    char *temp = (char *)malloc((len + 1) * sizeof(char));
+    snprintf(temp, len + 1, "[%03d]", (int)size);
+    strcat(msg_data, temp);
+    free(temp);
+
+    size_t max_size = is_bin? 35: 70;
+    const char *ellipsis = "";
+    if (size > max_size) {
+        size = max_size;
+        ellipsis = "...";
+    }
+    for (char_nbr = 0; char_nbr < size; char_nbr++) {
+        if (is_bin) {
+            int len = snprintf(NULL, 0, "%02X", (unsigned char) data [char_nbr]);
+            char *temp = (char *)malloc((len + 1) * sizeof(char));
+            snprintf(temp, len + 1, "%02X", (unsigned char) data [char_nbr]);
+            strcat(msg_data, temp);
+            free(temp);
+        } else {
+            int len = snprintf(NULL, 0, "%c", data[char_nbr]);
+            char *temp = (char *)malloc((len + 1) * sizeof(char));
+            snprintf(temp, len + 1, "%c", data[char_nbr]);
+            strcat(msg_data, temp);
+            free(temp);
+        }
+    }
+    strcat(msg_data, ellipsis);
+    return msg_data;
+}
+
 void zmsg_log_dump(zmsg_t *msg, const char *prefix) {
+    if (!msg) {
+        LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, "NULL");
+        return;
+    }
+    zframe_t *frame = zmsg_first(msg);
+    int frame_nbr = 0;
+    char msg_data[256] = "";
+    while (frame && frame_nbr++ < 10) {
+        char temp[10] = "";
+        sprintf(temp, " %s-%d:", "frame", frame_nbr);
+        strcat(msg_data, temp);
+        char *frame_str = get_zframe_str(frame, NULL);
+        strcat(msg_data, frame_str);
+        frame = zmsg_next(msg);
+        free(frame_str);
+    }
+    LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, msg_data);
+
+    /**
     zmsg_t *debug_msg = zmsg_dup(msg);
     int msglen = zmsg_size(debug_msg);
     char msg_data[256];
     for (int i = 0; i < msglen; i++){
         char temp[10];
-        sprintf(temp, "%s-%d:", "frame", i);
+        sprintf(temp, " %s-%d:", "frame", i);
         strcat(msg_data, temp);
         strcat(msg_data, zmsg_popstr(debug_msg));
     }
     LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, msg_data);
     zmsg_destroy(&debug_msg);
+    */
 }
