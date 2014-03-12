@@ -75,7 +75,6 @@ s_mdp_worker_send_to_broker (mdp_worker_t *self, char *command, char *option,
             mdpw_commands [(int) *command]);
         zmsg_dump (msg);
     }
-    zmsg_log_dump(msg, "------worker send msg to broker");
     zmsg_send (&msg, self->worker);
 }
 
