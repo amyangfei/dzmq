@@ -100,6 +100,7 @@ static char *
 get_zframe_str(zframe_t *self, const char *prefix) {
     assert (self);
     char *msg_data = (char *)malloc(256 * sizeof(char));
+    memset(msg_data, 0, 256 * sizeof(char));
     if (prefix)
         strcat(msg_data, prefix);
     byte *data = zframe_data (self);
@@ -112,10 +113,11 @@ get_zframe_str(zframe_t *self, const char *prefix) {
             is_bin = 1;
 
     int len = snprintf(NULL, 0, "[%03d]", (int)size);
-    char *temp = (char *)malloc((len + 1) * sizeof(char));
-    snprintf(temp, len + 1, "[%03d]", (int)size);
-    strcat(msg_data, temp);
-    free(temp);
+    char *size_tip = (char *)malloc((len + 1) * sizeof(char));
+    snprintf(size_tip, len + 1, "[%03d]", (int)size);
+    strcat(msg_data, size_tip);
+    free(size_tip);
+    size_tip = NULL;
 
     size_t max_size = is_bin? 35: 70;
     const char *ellipsis = "";
@@ -126,16 +128,18 @@ get_zframe_str(zframe_t *self, const char *prefix) {
     for (char_nbr = 0; char_nbr < size; char_nbr++) {
         if (is_bin) {
             int len = snprintf(NULL, 0, "%02X", (unsigned char) data [char_nbr]);
-            char *temp = (char *)malloc((len + 1) * sizeof(char));
-            snprintf(temp, len + 1, "%02X", (unsigned char) data [char_nbr]);
-            strcat(msg_data, temp);
-            free(temp);
+            char *frame_cnt = (char *)malloc((len + 1) * sizeof(char));
+            snprintf(frame_cnt, len + 1, "%02X", (unsigned char) data [char_nbr]);
+            strcat(msg_data, frame_cnt);
+            free(frame_cnt);
+            frame_cnt = NULL;
         } else {
             int len = snprintf(NULL, 0, "%c", data[char_nbr]);
-            char *temp = (char *)malloc((len + 1) * sizeof(char));
-            snprintf(temp, len + 1, "%c", data[char_nbr]);
-            strcat(msg_data, temp);
-            free(temp);
+            char *frame_cnt = (char *)malloc((len + 1) * sizeof(char));
+            snprintf(frame_cnt, len + 1, "%c", data[char_nbr]);
+            strcat(msg_data, frame_cnt);
+            free(frame_cnt);
+            frame_cnt = NULL;
         }
     }
     strcat(msg_data, ellipsis);

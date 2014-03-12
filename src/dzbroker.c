@@ -345,7 +345,7 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         }
         //  Route reply to client if we still need to
         if (msg) {
-            zmsg_print(msg);
+            /*zmsg_print(msg);*/
             zmsg_send (&msg, self->localfe);
         }
     } else if (zframe_streq(command, MDPW_HEARTBEAT)) {
@@ -484,6 +484,7 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
         //  We broadcast capacity messages to other peers; to reduce chatter,
         //  we do this only if our capacity changed.
 
+        printf("dzbroker-%s local_capacity = %d\n", self->name, self->local_capacity);
         if (self->local_capacity != previous) {
             //  We stick our own identity onto the envelope
             zstr_sendm(self->statebe, self->name);
@@ -546,6 +547,8 @@ client_task (void *args)
 void *
 client_task_mdp (void *args)
 {
+    static int total = 0;
+    static int success  = 0;
     bind_info *binfo = (bind_info *)args;
     int client_id = binfo->nbr_id;
     const char *bind_addr = binfo->bind_addr;
@@ -567,14 +570,23 @@ client_task_mdp (void *args)
             zmsg_pushstr(request, task_id);
 
             //  Send request with random hex ID
-            LOG_PRINT(LOG_INFO, "client-%d send %s", client_id, task_id);
+            LOG_PRINT(LOG_INFO, "client-%d new request %s", client_id, task_id);
             mdp_client_send(mdp_client, "echo", &request);
+            __sync_fetch_and_add(&total, 1);
 
             zmsg_t *reply = mdp_client_timeout_recv(mdp_client, NULL, NULL, client_id, task_id);
             if (reply == NULL) {
                 break;
             } else {
-                zmsg_log_dump(reply, "client recv back");
+                zframe_t *data = zmsg_first(reply);
+                if (strcmp(task_id, zframe_strdup(data)) == 0) {
+                    __sync_fetch_and_add(&success, 1);
+                    /*success++;*/
+                    printf("total:%d, success:%d\n", total, success);
+                    zmsg_log_dump(reply, "client recv back success");
+                } else {
+                    zmsg_log_dump(reply, "client recv back fail");
+                }
             }
             zmsg_destroy(&reply);
         }
