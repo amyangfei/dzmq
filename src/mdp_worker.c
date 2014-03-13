@@ -58,7 +58,7 @@ struct _mdp_worker_t {
 //  If no msg is provided, creates one internally
 
 static void
-s_mdp_worker_send_to_broker (mdp_worker_t *self, char *command, char *option,
+s_mdp_worker_send_to_broker (mdp_worker_t *self, const char *command, char *option,
                         zmsg_t *msg)
 {
     msg = msg? zmsg_dup (msg): zmsg_new ();
@@ -254,6 +254,7 @@ mdp_worker_recv (mdp_worker_t *self, zframe_t **reply_to_p)
                 if (reply_to_p) {
                     *reply_to_p = reply_to;
                     zmsg_push(msg, service);
+                    zmsg_pushstr(msg, MDPW_REPORT_LOCAL);
                 }
                 else
                     zframe_destroy (&reply_to);
@@ -264,6 +265,24 @@ mdp_worker_recv (mdp_worker_t *self, zframe_t **reply_to_p)
                 return msg;     //  We have a request to process
             }
             else
+            if (zframe_streq (command, MDPW_REPOST)) {
+                zframe_t *service = zmsg_pop(msg);
+                zframe_t *peer_name = zmsg_pop(msg);
+                zframe_t *reply_to = zmsg_unwrap (msg);
+                if (reply_to_p) {
+                    *reply_to_p = reply_to;
+                    zmsg_push(msg, service);
+                    zmsg_push(msg, peer_name);
+                    zmsg_pushstr(msg, MDPW_REPORT_CLOUD);
+                }
+                else
+                    zframe_destroy (&reply_to);
+
+                zframe_destroy (&command);
+                //  Here is where we actually have a message to process; we
+                //  return it to the caller application
+                return msg;     //  We have a request to process
+            }
             if (zframe_streq (command, MDPW_HEARTBEAT))
                 ;               //  Do nothing for heartbeats
             else
@@ -305,8 +324,15 @@ mdp_worker_send (mdp_worker_t *self, zmsg_t **report_p, zframe_t *reply_to)
     zmsg_t *report = *report_p;
     assert (report);
     assert (reply_to);
+
+    zframe_t *command_frame = zmsg_pop(report);
+    char *command = zframe_strdup(command_frame);
     // Add client address
     zmsg_wrap (report, zframe_dup (reply_to));
-    s_mdp_worker_send_to_broker (self, MDPW_REPORT, NULL, report);
+    s_mdp_worker_send_to_broker (self, command, NULL, report);
+    /*s_mdp_worker_send_to_broker (self, MDPW_REPORT, NULL, report);*/
+    free(command);
+    command = NULL;
+    zframe_destroy(&command_frame);
     zmsg_destroy (report_p);
 }

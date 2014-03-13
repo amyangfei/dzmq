@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
         log_init();
     }
 
+    srandom ((unsigned) time (NULL));
     test_broker(argc, argv);
     LOG_PRINT(LOG_INFO, "main return %s", _init_path);
 }

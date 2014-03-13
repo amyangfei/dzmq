@@ -35,9 +35,11 @@
 #define MDPC_REQUEST        "\001"
 #define MDPC_REPORT         "\002"
 #define MDPC_NAK            "\003"
+// client message repost to cloud
+#define MDPC_REPOST         "\004"
 
 static char *mdpc_commands [] = {
-    NULL, "REQUEST", "REPORT", "NAK",
+    NULL, "REQUEST", "REPORT", "NAK", "MDPC_REPOST"
 };
 
 //  This is the version of MDP/Worker we implement
@@ -49,9 +51,13 @@ static char *mdpc_commands [] = {
 #define MDPW_REPORT         "\003"
 #define MDPW_HEARTBEAT      "\004"
 #define MDPW_DISCONNECT     "\005"
+#define MDPW_REPOST         "\006"
+#define MDPW_REPORT_LOCAL   "\007"
+#define MDPW_REPORT_CLOUD   "\010"
 
 static char *mdpw_commands [] = {
-    NULL, "READY", "REQUEST", "REPORT", "HEARTBEAT", "DISCONNECT"
+    NULL, "READY", "REQUEST", "REPORT", "HEARTBEAT", "DISCONNECT",
+    "MDPW_REPOST", "MMDPW_REPORT_LOCA", "MDPW_REPORT_CLOUD"
 };
 
 #endif

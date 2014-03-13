@@ -30,7 +30,7 @@ struct _dz_broker {
 static void
     s_broker_worker_msg (dz_broker *self, zmsg_t *msg, bool from_local);
 static void
-    s_broker_client_msg (dz_broker *self, zmsg_t *msg);
+    s_broker_client_msg (dz_broker *self, zmsg_t *msg, bool from_local);
 static void
     s_broker_purge (dz_broker *self);
 
@@ -54,6 +54,7 @@ dz_broker_new(const char *local, char **remote, int rlen) {
     zsocket_bind(self->cloudfe, "ipc://%s-cloud.ipc", local);
 
     self->cloudbe = zsocket_new(self->ctx, ZMQ_ROUTER);
+    zsocket_set_identity(self->cloudbe, local);
     for (int i = 0; i < rlen; i++) {
         char *peer = remote[i];
         LOG_PRINT(LOG_DEBUG, "I: connecting to cloud frontend at '%s'\n", peer);
@@ -181,7 +182,6 @@ void dz_broker_main_loop(dz_broker *self) {
             zmsg_send (&msg, self->localfe);
         }
 
-        //  .split handle state messages
         //  If we have input messages on our statefe sockets, we
         //  can process these immediately:
 
@@ -284,7 +284,9 @@ s_worker_require (dz_broker *self, zframe_t *address)
 }
 
 void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
-    assert(zmsg_size(msg) >= 4);    // At least: identity, empty, header, command
+    // At least: identity, empty, header, command
+    // or identity, empty, header, command [peer_name] service data
+    assert(zmsg_size(msg) >= 4);
     zframe_t *sender = zmsg_pop (msg);
     zframe_t *empty  = zmsg_pop (msg);
     zframe_t *header = zmsg_pop (msg);
@@ -319,10 +321,10 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         LOG_PRINT(LOG_INFO, "worker-%s ready and broker worker_t created", identity);
         free(identity);
         zmsg_destroy(&msg);
-    }  else if (zframe_streq(command, MDPW_REPORT)) {
+    }  else if (zframe_streq(command, MDPW_REPORT_LOCAL)) {
         //  Remove & save client return envelope and insert the
         //  protocol header and service name, then rewrap envelope.
-        zmsg_log_dump(msg, "REPORT");
+        zmsg_log_dump(msg, "REPORT TO LOCAL");
         zframe_t *client = zmsg_unwrap (msg);
         /*zmsg_pushstr (msg, worker->service);*/
         zmsg_pushstr (msg, MDPC_REPORT);
@@ -334,20 +336,44 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
             zlist_append(self->workers, sender);
         }
 
-        char *data = (char *) zframe_data (client);
-        //  Route reply to cloud if it's addressed to a broker
-        for (int i = 0; msg && i < self->rlen; i++) {
-            /*char *data = (char *) zframe_data (zmsg_first (msg));*/
-            size_t size = zframe_size (zmsg_first (msg));
-            if (size == strlen(self->remote[i]) &&  memcmp (data, self->remote[i], size) == 0) {
-                zmsg_send (&msg, self->cloudfe);
-            }
-        }
         //  Route reply to client if we still need to
         if (msg) {
-            /*zmsg_print(msg);*/
             zmsg_send (&msg, self->localfe);
         }
+    } else if (zframe_streq(command, MDPW_REPORT_CLOUD)) {
+        if (from_local) {
+            self->local_capacity++;
+            zlist_append(self->workers, sender);
+
+            zframe_t *client = zmsg_unwrap (msg);
+            zframe_t *peer_name = zmsg_pop(msg);
+
+            char *data = (char *) zframe_data (peer_name);
+            //  Route reply to cloud if it's addressed to a broker
+            for (int i = 0; msg && i < self->rlen; i++) {
+                size_t size = zframe_size (peer_name);
+                if (size == strlen(self->remote[i]) &&  memcmp (data, self->remote[i], size) == 0) {
+                    zmsg_pushstr (msg, MDPW_REPORT_CLOUD);
+                    zmsg_pushstr (msg, MDPW_WORKER);
+                    zmsg_wrap (msg, client);
+                    zmsg_push(msg, peer_name);
+
+                    zmsg_send (&msg, self->cloudfe);
+                }
+            }
+
+        }
+        else {
+            // msg: service data
+
+            zmsg_pushstr (msg, MDPC_REPORT);
+            zmsg_pushstr (msg, MDPC_CLIENT);
+            zmsg_wrap (msg, sender);
+
+            zmsg_log_dump(msg, "WORK DONE BY PEER");
+            zmsg_send (&msg, self->localfe);
+        }
+
     } else if (zframe_streq(command, MDPW_HEARTBEAT)) {
         worker->expiry = zclock_time() + HEARTBEAT_EXPIRY;
     } else if (zframe_streq(command, MDPW_DISCONNECT)) {
@@ -360,39 +386,60 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
 }
 
 static void
-s_broker_client_msg(dz_broker *self, zmsg_t *msg) {
+s_broker_client_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
     // At least: identity, empty, header, service_name, body
     assert (zmsg_size (msg) >= 5);
 
     zframe_t *sender = zmsg_pop (msg);
-    zframe_t *empty  = zmsg_pop (msg);
-    zframe_t *header = zmsg_pop (msg);
-    zframe_t *service = zmsg_pop (msg);
 
     // TODO: check whether service available
     if (self->local_capacity) {
-        zmsg_wrap(msg, sender);
-        /**
-        zmsg_pushstr(msg, MDPW_REQUEST);
-        zmsg_pushstr(msg, MDPW_WORKER);
-        */
+        if (from_local) {
+            zframe_t *empty  = zmsg_pop (msg);
+            zframe_t *header = zmsg_pop (msg);
+            zframe_destroy(&empty);
+            zframe_destroy(&header);
+            zframe_t *service = zmsg_pop (msg);
 
-        zmsg_push(msg, service);
-        zmsg_pushstr(msg, MDPW_REQUEST);
+            zmsg_wrap(msg, sender);
+            zmsg_push(msg, service);
+            zmsg_pushstr(msg, MDPW_REQUEST);
+        } else {
+            zframe_t *header = zmsg_pop(msg);
+            assert(zframe_streq(header, MDPC_CLIENT));
+            zframe_destroy (&header);
+
+            zframe_t *command = zmsg_pop(msg);
+            assert(zframe_streq(command, MDPC_REPOST));
+            zframe_destroy (&command);
+
+            zmsg_pushstr(msg, MDPW_REPOST);
+        }
         zmsg_pushstr(msg, MDPW_WORKER);
         zframe_t *frame = (zframe_t *)zlist_pop(self->workers);
         zmsg_wrap (msg, frame);
 
         zmsg_send (&msg, self->localbe);
         self->local_capacity--;
-    } else {
-        //  Route to random broker peer
-        zmsg_wrap(msg, sender);
-        zmsg_push(msg, service);
-        zmsg_pushstr(msg, MDPW_REQUEST);
-        zmsg_pushstr(msg, MDPW_WORKER);
 
+    } else {
+        zframe_t *empty  = zmsg_pop (msg);
+        zframe_t *header = zmsg_pop (msg);
+        zframe_t *service = zmsg_pop (msg);
+        zframe_destroy(&empty);
+        zframe_destroy(&header);
+
+        //  Route to random broker peer
         int peer = randof(self->rlen);
+
+        zmsg_wrap(msg, sender);
+        zmsg_pushstr(msg, self->name);
+        /*zmsg_pushmem (msg, self->remote[peer], strlen(self->remote[peer]));*/
+        /*zmsg_pushmem (msg, self->name, strlen(self->name));*/
+        zmsg_push(msg, service);
+        zmsg_pushstr(msg, MDPC_REPOST);
+        zmsg_pushstr(msg, MDPC_CLIENT);
+
         zmsg_pushmem (msg, self->remote[peer], strlen(self->remote[peer]));
         zmsg_log_dump(msg, "Route msg");
 
@@ -439,6 +486,8 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
             msg = zmsg_recv(self->cloudbe);
             if (!msg)
                 break;          //  Interrupted
+            zframe_t *remote_name = zmsg_pop(msg);
+            zframe_destroy(&remote_name);
             s_broker_worker_msg(self, msg, false);
         }
 
@@ -469,17 +518,18 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
                 rc = zmq_poll(secondary, 1, 0);
             assert (rc >= 0);
 
+            bool from_local = true;
             if (secondary [0].revents & ZMQ_POLLIN) {
                 msg = zmsg_recv(self->localfe);
             }
             else if (secondary [1].revents & ZMQ_POLLIN) {
                 msg = zmsg_recv(self->cloudfe);
+                from_local = false;
                 LOG_PRINT(LOG_DEBUG, "GET msg from broker peer");
             } else {
                 break;      //  No work, go back to primary
             }
-
-            s_broker_client_msg(self, msg);
+            s_broker_client_msg(self, msg, from_local);
         }
         //  We broadcast capacity messages to other peers; to reduce chatter,
         //  we do this only if our capacity changed.
@@ -549,6 +599,8 @@ client_task_mdp (void *args)
 {
     static int total = 0;
     static int success  = 0;
+    static int fail = 0;
+    static int lost = 0;
     bind_info *binfo = (bind_info *)args;
     int client_id = binfo->nbr_id;
     const char *bind_addr = binfo->bind_addr;
@@ -566,7 +618,6 @@ client_task_mdp (void *args)
             zmsg_t *request = zmsg_new();
             char task_id [5];
             sprintf (task_id, "%04X", randof (0x10000));
-            /*zmsg_pushstr(request, "data");*/
             zmsg_pushstr(request, task_id);
 
             //  Send request with random hex ID
@@ -576,15 +627,20 @@ client_task_mdp (void *args)
 
             zmsg_t *reply = mdp_client_timeout_recv(mdp_client, NULL, NULL, client_id, task_id);
             if (reply == NULL) {
+                __sync_fetch_and_add(&lost, 1);
+                printf("total:%d, success:%d, fail:%d\n", total, success, fail);
                 break;
             } else {
+                zmsg_log_dump(reply, "client recv back:):):):):)");
                 zframe_t *data = zmsg_first(reply);
                 if (strcmp(task_id, zframe_strdup(data)) == 0) {
                     __sync_fetch_and_add(&success, 1);
-                    /*success++;*/
-                    printf("total:%d, success:%d\n", total, success);
+                    printf("total:%d, success:%d, fail:%d, lost:%d\n", total, success, fail, lost);
                     zmsg_log_dump(reply, "client recv back success");
                 } else {
+                    __sync_fetch_and_add(&fail, 1);
+                    printf("%s------%s\n", task_id, zframe_strdup(data));
+                    printf("total:%d, success:%d, fail:%d, lost:%d\n", total, success, fail, lost);
                     zmsg_log_dump(reply, "client recv back fail");
                 }
             }
@@ -643,6 +699,7 @@ worker_task_mdp(void *args) {
         zmsg_t *request = mdp_worker_recv (mdp_worker, &reply_to);
         if (request == NULL)
             break;              //  Worker was interrupted
+        zmsg_log_dump(request, "WORKER RECV");
 
         //  Workers are busy for 0/1 seconds
         sleep (randof (2));
