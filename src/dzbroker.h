@@ -27,9 +27,5 @@ void dz_broker_sim_client(dz_broker *self, int client_num, int verbose);
 void dz_broker_sim_worker(dz_broker *self, int worker_num, int verbose);
 void dz_broker_main_loop(dz_broker *self);
 void dz_broker_main_loop_mdp(dz_broker *self);
-void *client_task (void *args);
-void *client_task_mdp (void *args);
-void *worker_task (void *args);
-void *worker_task_mdp(void *args);
 
 #endif
