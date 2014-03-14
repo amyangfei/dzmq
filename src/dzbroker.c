@@ -322,8 +322,7 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         free(identity);
         zmsg_destroy(&msg);
     }  else if (zframe_streq(command, MDPW_REPORT_LOCAL)) {
-        //  Remove & save client return envelope and insert the
-        //  protocol header and service name, then rewrap envelope.
+        // handle self client's request, and send back to local client
         zmsg_log_dump(msg, "REPORT TO LOCAL");
         zframe_t *client = zmsg_unwrap (msg);
         /*zmsg_pushstr (msg, worker->service);*/
@@ -342,6 +341,7 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         }
     } else if (zframe_streq(command, MDPW_REPORT_CLOUD)) {
         if (from_local) {
+            // handle peer cient's request, and send back to cloud
             self->local_capacity++;
             zlist_append(self->workers, sender);
 
@@ -405,6 +405,7 @@ s_broker_client_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
             zmsg_push(msg, service);
             zmsg_pushstr(msg, MDPW_REQUEST);
         } else {
+            // send other peer's client request
             zframe_t *header = zmsg_pop(msg);
             assert(zframe_streq(header, MDPC_CLIENT));
             zframe_destroy (&header);
