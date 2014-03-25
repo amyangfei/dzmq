@@ -8,13 +8,13 @@
 
 extern struct setting settings;
 
-static void settings_init(const char *broker_name);
+static void settings_init(const char *broker_name, const bool log);
 
-static void settings_init(const char *broker_name) {
+static void settings_init(const char *broker_name, const bool log) {
     char temp[32] = "";
     sprintf(temp, "./log/%s.log", broker_name);
     strcpy(settings.log_name, temp);
-    settings.log = true;
+    settings.log = log;
 }
 
 void segfault_sigaction(int signal, siginfo_t *si, void *arg) {
@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     const char *broker_name = argv[1];
-    settings_init(broker_name);
+    settings_init(broker_name, false);
     if (settings.log) {
         const char *log_path = "./log";
         if (is_dir(log_path) != 1) {
