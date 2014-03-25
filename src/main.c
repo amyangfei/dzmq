@@ -5,6 +5,7 @@
 #include "dzlog.h"
 #include "dzutil.h"
 #include "dzbroker.h"
+#include "dztester.h"
 
 extern struct setting settings;
 

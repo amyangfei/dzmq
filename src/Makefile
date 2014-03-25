@@ -1,7 +1,7 @@
 OS = $(shell uname)
 
 LIBS = -lzmq -lczmq
-OBJS = dzutil.o dzlog.o dzspinlock.o dzservice.o mdp_client.o mdp_worker.o dzbroker.o main.o
+OBJS = dzutil.o dzlog.o dzspinlock.o dzservice.o mdp_client.o mdp_worker.o dzbroker.o dztester.o main.o
 
 ifeq ($(OS),Darwin)
 	CFLAGS = -Wall
