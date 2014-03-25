@@ -206,7 +206,7 @@ mdp_client_recv (mdp_client_t *self, char **command_p, char **service_p)
 zmsg_t *
 mdp_client_timeout_recv(mdp_client_t *self, char **command_p, char **service_p, int client_id, char *task_id) {
     zmq_pollitem_t pollset[1] = { { self->client, 0, ZMQ_POLLIN, 0 } };
-    int rc = zmq_poll (pollset, 1, 4 * 1000 * ZMQ_POLL_MSEC);
+    int rc = zmq_poll (pollset, 1, 10 * 1000 * ZMQ_POLL_MSEC);
     if (rc == -1) {
         LOG_PRINT(LOG_ERROR, "client-%d -recv Interrupted - lost task %s", client_id, task_id);
         /*break;          //  Interrupted*/

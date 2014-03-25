@@ -6,8 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include "czmq.h"
 
-#define _DEBUG 1
+//#define _DEBUG 1
 
 #define MAX_LINE 1024
 
@@ -16,6 +17,7 @@ struct setting{
     char log_name[512];
     int backlog;
     bool log;
+    zhash_t *nodes;
 } settings;
 
 

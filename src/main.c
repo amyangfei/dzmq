@@ -9,12 +9,58 @@
 extern struct setting settings;
 
 static void settings_init(const char *broker_name, const bool log);
+static void nodes_info_init(const char *config_file);
+static int test_foreach (const char *key, void *item, void *arg);
+static void nodes_endpoint_destory(void *argument);
 
 static void settings_init(const char *broker_name, const bool log) {
     char temp[32] = "";
     sprintf(temp, "./log/%s.log", broker_name);
     strcpy(settings.log_name, temp);
     settings.log = log;
+    settings.nodes = zhash_new();
+    nodes_info_init("./config/nodes.example.conf");
+}
+
+static void nodes_info_init(const char *config_file) {
+    FILE *fp = fopen(config_file, "r");
+    char node[MAX_LINE] = "";
+    char buf[MAX_LINE] = "";
+    int r, line = 0;
+    if (fp == NULL) {
+        printf("Error opening file");
+        exit(EXIT_FAILURE);
+    } else {
+        r = fscanf(fp, "%s %s\n", node, buf);
+        while (r != EOF) {
+            line++;
+            if (r == 2) {
+                char *endpoint = (char *)malloc(sizeof(char)*strlen(buf) + 1);
+                strncpy(endpoint, buf, strlen(buf) + 1);
+                zhash_insert(settings.nodes, node, endpoint);
+                zhash_freefn(settings.nodes, node, nodes_endpoint_destory);
+            } else {
+                printf("Error, line %d in wrong format\n", line);
+            }
+            r = fscanf(fp, "%s %s\n", node, buf);
+        }
+        fclose(fp);
+    }
+    /*zhash_foreach(settings.nodes, test_foreach, NULL);*/
+}
+
+static void nodes_endpoint_destory(void *argument) {
+    char *endpoint = (char *) argument;
+    free(endpoint);
+    endpoint = NULL;
+}
+
+static int test_foreach (const char *key, void *item, void *arg) {
+    char temp[MAX_LINE];
+    char port[6] = "";
+    sscanf((char *)item, "%[^:]:%s", temp, port);
+    printf("%s: %s, port=%s\n", key, item, port);
+    return 0;
 }
 
 void segfault_sigaction(int signal, siginfo_t *si, void *arg) {
@@ -85,7 +131,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     const char *broker_name = argv[1];
-    settings_init(broker_name, false);
+    settings_init(broker_name, true);
     if (settings.log) {
         const char *log_path = "./log";
         if (is_dir(log_path) != 1) {

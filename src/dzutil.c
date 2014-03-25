@@ -164,18 +164,13 @@ void zmsg_log_dump(zmsg_t *msg, const char *prefix) {
         free(frame_str);
     }
     LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, msg_data);
+}
 
-    /**
-    zmsg_t *debug_msg = zmsg_dup(msg);
-    int msglen = zmsg_size(debug_msg);
-    char msg_data[256];
-    for (int i = 0; i < msglen; i++){
-        char temp[10];
-        sprintf(temp, " %s-%d:", "frame", i);
-        strcat(msg_data, temp);
-        strcat(msg_data, zmsg_popstr(debug_msg));
-    }
-    LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, msg_data);
-    zmsg_destroy(&debug_msg);
-    */
+void millisecond_sleep(int sec, int micro_sec) {
+    long n = micro_sec * (1e-3) / (1e-9);
+    struct timespec ts;
+    ts.tv_sec = sec;
+    ts.tv_nsec = n;
+    if(nanosleep(&ts, NULL) != 0)
+        perror("");
 }

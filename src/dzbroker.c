@@ -56,25 +56,39 @@ dz_broker_new(const char *local, char **remote, int rlen) {
 
     self->cloudfe = zsocket_new(self->ctx, ZMQ_ROUTER);
     zsocket_set_identity(self->cloudfe, local);
-    zsocket_bind(self->cloudfe, "ipc://%s-cloud.ipc", local);
+    /*zsocket_bind(self->cloudfe, "ipc://%s-cloud.ipc", local);*/
+    char node_cloudfe[MAX_LINE] = "";
+    snprintf(node_cloudfe, MAX_LINE, "%s-cloudfe", local);
+    char *cloudfe_endpoint = (char *)zhash_lookup(settings.nodes, node_cloudfe);
+    zsocket_bind(self->cloudfe, "tcp://%s", cloudfe_endpoint);
 
     self->cloudbe = zsocket_new(self->ctx, ZMQ_ROUTER);
     zsocket_set_identity(self->cloudbe, local);
     for (int i = 0; i < rlen; i++) {
         char *peer = remote[i];
-        LOG_PRINT(LOG_DEBUG, "I: connecting to cloud frontend at '%s'\n", peer);
-        zsocket_connect(self->cloudbe, "ipc://%s-cloud.ipc", peer);
+        snprintf(node_cloudfe, MAX_LINE, "%s-cloudfe", peer);
+        cloudfe_endpoint = (char *)zhash_lookup(settings.nodes, node_cloudfe);
+        LOG_PRINT(LOG_INFO, "I: connecting to cloud frontend at '%s %s'\n", peer, cloudfe_endpoint);
+        /*zsocket_connect(self->cloudbe, "ipc://%s-cloud.ipc", peer);*/
+        zsocket_connect(self->cloudbe, "tcp://%s", cloudfe_endpoint);
     }
 
     self->statebe = zsocket_new(self->ctx, ZMQ_PUB);
-    zsocket_bind(self->statebe, "ipc://%s-state.ipc", local);
+    char node_statebe[MAX_LINE] = "";
+    snprintf(node_statebe, MAX_LINE, "%s-statebe", local);
+    char *statebe_endpoint = (char *)zhash_lookup(settings.nodes, node_statebe);
+    /*zsocket_bind(self->statebe, "ipc://%s-state.ipc", local);*/
+    zsocket_bind(self->statebe, "tcp://%s", statebe_endpoint);
 
     self->statefe = zsocket_new(self->ctx, ZMQ_SUB);
     zsocket_set_subscribe(self->statefe, "");
     for (int i = 0; i < rlen; i++) {
         char *peer = remote[i];
-        LOG_PRINT(LOG_DEBUG, "I: connecting to state backend at '%s'\n", peer);
-        zsocket_connect(self->statefe, "ipc://%s-state.ipc", peer);
+        snprintf(node_statebe, MAX_LINE, "%s-statebe", peer);
+        statebe_endpoint = (char *)zhash_lookup(settings.nodes, node_statebe);
+        LOG_PRINT(LOG_INFO, "I: connecting to state backend at '%s', %s\n", peer, statebe_endpoint);
+        /*zsocket_connect(self->statefe, "ipc://%s-state.ipc", peer);*/
+        zsocket_connect(self->statefe, "tcp://%s", statebe_endpoint);
     }
 
     self->local_capacity = 0;
@@ -451,7 +465,7 @@ client_task_mdp (void *args)
     mdp_client_t *mdp_client = mdp_client_new(endpoint, verbose);
 
     while (true) {
-        sleep (randof (5));
+        millisecond_sleep(0, 500);
         int burst = randof (15);
         while (burst--) {
             zmsg_t *request = zmsg_new();
@@ -460,7 +474,7 @@ client_task_mdp (void *args)
             zmsg_pushstr(request, task_id);
 
             //  Send request with random hex ID
-            LOG_PRINT(LOG_INFO, "client-%d new request %s", client_id, task_id);
+            LOG_PRINT(LOG_DEBUG, "client-%d new request %s", client_id, task_id);
             mdp_client_send(mdp_client, "echo", &request);
             __sync_fetch_and_add(&total, 1);
 
@@ -510,11 +524,10 @@ worker_task_mdp(void *args) {
             break;              //  Worker was interrupted
         zmsg_log_dump(request, "WORKER RECV");
 
-        //  Workers are busy for 0/1 seconds
-        sleep (randof (2));
+        millisecond_sleep(0, randof(3) * 100);
         //  Echo message
         mdp_worker_send (mdp_worker, &request, reply_to);
-        LOG_PRINT(LOG_INFO, "worker-%d done and send back", worker_id);
+        LOG_PRINT(LOG_DEBUG, "worker-%d done and send back", worker_id);
         zframe_destroy (&reply_to);
     }
     mdp_worker_destroy(&mdp_worker);
