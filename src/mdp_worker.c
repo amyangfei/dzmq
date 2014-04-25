@@ -70,11 +70,6 @@ s_mdp_worker_send_to_broker (mdp_worker_t *self, const char *command, char *opti
     zmsg_pushstr (msg, MDPW_WORKER);
     zmsg_pushstr (msg, "");
 
-    if (self->verbose) {
-        zclock_log ("I: sending %s to broker",
-            mdpw_commands [(int) *command]);
-        zmsg_dump (msg);
-    }
     zmsg_send (&msg, self->worker);
 }
 

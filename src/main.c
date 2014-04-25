@@ -20,7 +20,7 @@ static void settings_init(const char *broker_name, const bool log) {
     strcpy(settings.log_name, temp);
     settings.log = log;
     settings.nodes = zhash_new();
-    nodes_info_init("./config/nodes.example.conf");
+    nodes_info_init("./nodes.conf");
 }
 
 static void nodes_info_init(const char *config_file) {

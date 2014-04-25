@@ -343,6 +343,8 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
         //  If we have no workers ready, wait indefinitely
         int rc = zmq_poll (primary, 3,
             self->local_capacity? 1000 * ZMQ_POLL_MSEC: -1);
+        /*int rc = zmq_poll (primary, 3, self->local_capacity? 0 * ZMQ_POLL_MSEC: -1);*/
+
         if (rc == -1)
             break;              //  Interrupted
 

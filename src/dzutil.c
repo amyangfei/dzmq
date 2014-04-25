@@ -147,6 +147,10 @@ get_zframe_str(zframe_t *self, const char *prefix) {
 }
 
 void zmsg_log_dump(zmsg_t *msg, const char *prefix) {
+#ifndef _DEBUG
+    return;
+#endif
+
     if (!msg) {
         LOG_PRINT(LOG_DEBUG, "%s:%s", prefix, "NULL");
         return;
@@ -167,10 +171,20 @@ void zmsg_log_dump(zmsg_t *msg, const char *prefix) {
 }
 
 void millisecond_sleep(int sec, int micro_sec) {
-    long n = micro_sec * (1e-3) / (1e-9);
+    if (micro_sec >= 1000) {
+        micro_sec = 500;
+    }
+    long n = (long)micro_sec * 1e6;
     struct timespec ts;
     ts.tv_sec = sec;
     ts.tv_nsec = n;
-    if(nanosleep(&ts, NULL) != 0)
-        perror("");
+    while (1) {
+        int rval = nanosleep (&ts, &ts);
+        if (rval == 0)
+            return;
+        else if (errno == EINTR)
+            continue;
+        else
+            perror("Nano sleep system call failed \n");
+    }
 }

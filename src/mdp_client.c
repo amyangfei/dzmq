@@ -165,10 +165,6 @@ mdp_client_recv (mdp_client_t *self, char **command_p, char **service_p)
         //  Interrupt
         return NULL;
 
-    if (self->verbose) {
-        zclock_log ("I: received reply:");
-        zmsg_dump (msg);
-    }
 
     //  Message format:
     //  Frame 1: empty frame (delimiter)
@@ -226,6 +222,28 @@ mdp_client_timeout_recv(mdp_client_t *self, char **command_p, char **service_p, 
         return reply;
     } else {
         LOG_PRINT(LOG_ERROR, "client-%d E: CLIENT EXIT - lost task %s", client_id, task_id);
+        return NULL;
+    }
+}
+
+zmsg_t *mdp_client_timeout_async_recv(mdp_client_t *self, char **command_p, char **service_p, int client_id, bool wait_forever) {
+    zmq_pollitem_t pollset[1] = { { self->client, 0, ZMQ_POLLIN, 0 } };
+    /*int rc = zmq_poll (pollset, 1, wait_forever ? -1 : 0);*/
+    int rc = zmq_poll (pollset, 1, 10 * 1000 * ZMQ_POLL_MSEC);
+    if (rc == -1) {
+        LOG_PRINT(LOG_ERROR, "client-%d -recv Interrupted - lost task", client_id);
+        return NULL;
+    }
+
+    if (pollset [0].revents & ZMQ_POLLIN) {
+        zmsg_t *reply = mdp_client_recv(self, command_p, service_p);
+        if (!reply) {
+            LOG_PRINT(LOG_ERROR, "client-%d interrupted", client_id);
+            return NULL;
+        }
+        return reply;
+    } else {
+        LOG_PRINT(LOG_ERROR, "client-%d E: CLIENT EXIT - lost task", client_id);
         return NULL;
     }
 }
