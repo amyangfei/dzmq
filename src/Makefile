@@ -7,7 +7,7 @@ HIREDIS = hiredis/net.o hiredis/sds.o hiredis/hiredis.o
 ifeq ($(OS),Darwin)
 	CFLAGS = -Wall
 else
-	CFLAGS = -Wall -std=c99 -pedantic -D_GNU_SOURCE
+	CFLAGS = -Wall -std=c99 -pedantic -D_GNU_SOURCE -D_HAVE_TIMERFD
 endif
 
 all: ${OBJS}

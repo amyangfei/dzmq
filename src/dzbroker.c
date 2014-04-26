@@ -7,6 +7,12 @@
 #include "dzcommon.h"
 #include "dzutil.h"
 
+#ifdef _HAVE_TIMERFD
+#include <sys/timerfd.h>
+#include <unistd.h>
+#endif
+#include <time.h>
+
 struct _dz_broker {
     zctx_t *ctx;            // Context
     const char *name;       // Broker name
@@ -18,6 +24,11 @@ struct _dz_broker {
     void *cloudbe;
     void *statefe;
     void *statebe;
+#ifdef _HAVE_TIMERFD
+    int timer_fd;
+#else
+    void *timer_sock;
+#endif
     int local_capacity;
     int cloud_capacity;
     zlist_t *workers;
@@ -33,6 +44,10 @@ static void
     s_broker_client_msg (dz_broker *self, zmsg_t *msg, bool from_local);
 static void
     s_broker_purge (dz_broker *self);
+#ifndef _HAVE_TIMERFD
+static void
+    timer_thread(void *args, zctx_t *ctx, void *pipe);
+#endif
 
 
 dz_broker *dz_broker_new(const char *local, char **remote, int rlen) {
@@ -85,6 +100,10 @@ dz_broker *dz_broker_new(const char *local, char **remote, int rlen) {
         /*zsocket_connect(self->statefe, "ipc://%s-state.ipc", peer);*/
         zsocket_connect(self->statefe, "tcp://%s", statebe_endpoint);
     }
+
+#ifdef _HAVE_TIMERFD
+    self->timer_fd = timerfd_create(CLOCK_REALTIME, 0);
+#endif
 
     self->local_capacity = 0;
     self->cloud_capacity = 0;
@@ -167,6 +186,8 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
     zframe_t *empty  = zmsg_pop (msg);
     zframe_t *header = zmsg_pop (msg);
     assert( zframe_streq(header, MDPW_WORKER) == true );
+    NOTUSED(empty);
+    NOTUSED(header);
 
     zframe_t *command = zmsg_pop(msg);
 
@@ -422,16 +443,49 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
     }
 }
 
+static void status_timer_task(void *args, zctx_t *ctx, void *pipe) {
+    NOTUSED(args);
+    NOTUSED(ctx);
+    while (true) {
+        sleep(BROADCAST_INTERVAL);
+        zstr_send(pipe, "status_timer timeout");
+    }
+}
+
 void dz_broker_main_loop_mdp2(dz_broker *self) {
+#ifdef _HAVE_TIMERFD
+    struct itimerspec status_timerspec;
+    struct timespec now;
+
+    if (clock_gettime(CLOCK_REALTIME, &now) == -1) {
+        LOG_PRINT(LOG_ERROR, "clock_gettime error");
+    }
+
+    status_timerspec.it_value.tv_sec = now.tv_sec + BROADCAST_INTERVAL;
+    status_timerspec.it_value.tv_nsec = now.tv_nsec;
+    status_timerspec.it_interval.tv_sec = BROADCAST_INTERVAL;
+    status_timerspec.it_interval.tv_nsec = 0;
+
+    if (timerfd_settime(self->timer_fd, TFD_TIMER_ABSTIME, &status_timerspec, NULL) == -1) {
+        LOG_PRINT(LOG_ERROR, "timerfd_settime error");
+    }
+#else
+    self->timer_sock = zthread_fork(self->ctx, status_timer_task, NULL);
+#endif
     while (true) {
         zmq_pollitem_t poller_items [] = {
             { self->localbe, 0, ZMQ_POLLIN, 0 },
             { self->cloudbe, 0, ZMQ_POLLIN, 0 },
             { self->statefe, 0, ZMQ_POLLIN, 0 },
+#ifdef _HAVE_TIMERFD
+            { 0, self->timer_fd, ZMQ_POLLIN, 0 },
+#else
+            { self->timer_sock, 0, ZMQ_POLLIN, 0 },
+#endif
             { self->localfe, 0, ZMQ_POLLIN, 0 },
             { self->cloudfe, 0, ZMQ_POLLIN, 0 }
         };
-        int poller_num = 3;
+        int poller_num = 4;
         if (self->local_capacity > 0) {
             poller_num += 2;
         } else if (self->cloud_capacity > 0) {
@@ -441,9 +495,6 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
         if (rc == -1)
             break;              //  Interrupted
 
-        // Track if capacity changes during this iteration
-        // TODO: use timer instead
-        int previous = self->local_capacity;
         zmsg_t *msg = NULL;
 
         if (poller_items[0].revents & ZMQ_POLLIN) {
@@ -473,22 +524,33 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
         }
 
         else if (poller_items[3].revents & ZMQ_POLLIN) {
+#ifdef _HAVE_TIMERFD
+            uint64_t exp;
+            ssize_t s = read(self->timer_fd, &exp, sizeof(uint64_t));
+            if (s != sizeof(uint64_t)) {
+                LOG_PRINT(LOG_ERROR, "timerfd read error");
+            }
+            LOG_PRINT(LOG_DEBUG, "use timerfd status timeout");
+#else
+            char *status_timeout_str = zstr_recv(self->timer_sock);
+            NOTUSED(status_timeout_str);
+            LOG_PRINT(LOG_DEBUG, "not use timerfd status timeout");
+#endif
+            zstr_sendm(self->statebe, self->name);
+            zstr_sendf(self->statebe, "%d", self->local_capacity);
+        }
+
+        else if (poller_items[4].revents & ZMQ_POLLIN) {
             msg = zmsg_recv(self->localfe);
             s_broker_client_msg(self, msg, true);
         }
 
-        else if (poller_items[4].revents & ZMQ_POLLIN) {
+        else if (poller_items[5].revents & ZMQ_POLLIN) {
             msg = zmsg_recv(self->cloudfe);
             s_broker_client_msg(self, msg, false);
             LOG_PRINT(LOG_DEBUG, "GET msg from broker peer");
         }
-
         // printf("dzbroker-%s local_capacity = %d\n", self->name, self->local_capacity);
-        //TODO: remove state boradcast from mainloop, use timer instead
-        if (self->local_capacity != previous) {
-            zstr_sendm(self->statebe, self->name);
-            zstr_sendf(self->statebe, "%d", self->local_capacity);
-        }
     }
 }
 

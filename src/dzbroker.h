@@ -8,6 +8,7 @@
 #define HEARTBEAT_LIVENESS  3       //  3-5 is reasonable
 #define HEARTBEAT_INTERVAL  2500    //  msecs
 #define HEARTBEAT_EXPIRY    HEARTBEAT_INTERVAL * HEARTBEAT_LIVENESS
+#define BROADCAST_INTERVAL  3       // 3 seconds
 
 typedef struct _dz_broker dz_broker;
 
