@@ -20,7 +20,7 @@ static void settings_init(const char *broker_name, const bool log) {
     strcpy(settings.log_name, temp);
     settings.log = log;
     settings.nodes = zhash_new();
-    nodes_info_init("./config/nodes.example.conf");
+    nodes_info_init("./nodes.conf");
 }
 
 static void nodes_info_init(const char *config_file) {
@@ -94,7 +94,7 @@ void test_broker(int argc, char **argv) {
     dz_broker *broker = dz_broker_new(local, remote, rlen);
     dz_broker_sim_worker(broker, NBR_WORKERS, verbose);
     dz_broker_sim_client(broker, NBR_CLIENTS, verbose);
-    dz_broker_main_loop_mdp(broker);
+    dz_broker_main_loop_mdp2(broker);
 
     free(remote);
     dz_broker_destory(&broker);
