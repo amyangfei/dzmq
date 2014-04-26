@@ -5,9 +5,9 @@
 #include "czmq.h"
 #include "dzbroker.h"
 
-#define NBR_CLIENTS 10
+#define NBR_CLIENTS 5
 #define NBR_WORKERS 5
-#define REQ_PER_SECOND 60
+#define REQ_PER_SECOND 30
 #define REQ_GROUP 4
 
 typedef struct{

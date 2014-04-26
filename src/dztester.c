@@ -22,8 +22,8 @@ void dz_broker_sim_client(dz_broker *self, int client_num, int verbose) {
         bind_info binfo = {i, addr, verbose};
         // TODO: a strange segmentation fault bug
         /*zthread_new(client_task_mdp, &binfo);*/
-        /*zthread_new(client_task_sync_test, &binfo);*/
-        zthread_new(client_task_async_test, &binfo);
+        zthread_new(client_task_sync_test, &binfo);
+        /*zthread_new(client_task_async_test, &binfo);*/
     }
 }
 

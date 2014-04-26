@@ -422,3 +422,73 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
     }
 }
 
+void dz_broker_main_loop_mdp2(dz_broker *self) {
+    while (true) {
+        zmq_pollitem_t poller_items [] = {
+            { self->localbe, 0, ZMQ_POLLIN, 0 },
+            { self->cloudbe, 0, ZMQ_POLLIN, 0 },
+            { self->statefe, 0, ZMQ_POLLIN, 0 },
+            { self->localfe, 0, ZMQ_POLLIN, 0 },
+            { self->cloudfe, 0, ZMQ_POLLIN, 0 }
+        };
+        int poller_num = 3;
+        if (self->local_capacity > 0) {
+            poller_num += 2;
+        } else if (self->cloud_capacity > 0) {
+            poller_num += 1;
+        }
+        int rc = zmq_poll(poller_items, poller_num, -1);
+        if (rc == -1)
+            break;              //  Interrupted
+
+        // Track if capacity changes during this iteration
+        // TODO: use timer instead
+        int previous = self->local_capacity;
+        zmsg_t *msg = NULL;
+
+        if (poller_items[0].revents & ZMQ_POLLIN) {
+            msg = zmsg_recv(self->localbe);
+            if (!msg)
+                break;          //  Interrupted
+            s_broker_worker_msg(self, msg, true);
+        }
+        // Or handle reply from peer broker, in fact this msg only goes to localfe?
+        else if (poller_items[1].revents & ZMQ_POLLIN) {
+            msg = zmsg_recv(self->cloudbe);
+            if (!msg)
+                break;          //  Interrupted
+            zframe_t *remote_name = zmsg_pop(msg);
+            zframe_destroy(&remote_name);
+            s_broker_worker_msg(self, msg, false);
+        }
+
+        //  If we have input messages on our statefe sockets, we can process these immediately:
+        //  TODO: fix state handle for multi-connecting peers
+        else if (poller_items[2].revents & ZMQ_POLLIN) {
+            char *peer = zstr_recv(self->statefe);
+            char *status = zstr_recv(self->statefe);
+            self->cloud_capacity = atoi(status);
+            free(peer);
+            free(status);
+        }
+
+        else if (poller_items[3].revents & ZMQ_POLLIN) {
+            msg = zmsg_recv(self->localfe);
+            s_broker_client_msg(self, msg, true);
+        }
+
+        else if (poller_items[4].revents & ZMQ_POLLIN) {
+            msg = zmsg_recv(self->cloudfe);
+            s_broker_client_msg(self, msg, false);
+            LOG_PRINT(LOG_DEBUG, "GET msg from broker peer");
+        }
+
+        // printf("dzbroker-%s local_capacity = %d\n", self->name, self->local_capacity);
+        //TODO: remove state boradcast from mainloop, use timer instead
+        if (self->local_capacity != previous) {
+            zstr_sendm(self->statebe, self->name);
+            zstr_sendf(self->statebe, "%d", self->local_capacity);
+        }
+    }
+}
+

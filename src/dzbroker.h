@@ -15,5 +15,6 @@ dz_broker *dz_broker_new(const char *local, char **remote, int rlen);
 void dz_broker_destory(dz_broker **self_p);
 const char *dz_broker_get_name(dz_broker *self);
 void dz_broker_main_loop_mdp(dz_broker *self);
+void dz_broker_main_loop_mdp2(dz_broker *self);
 
 #endif
