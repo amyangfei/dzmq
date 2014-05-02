@@ -8,7 +8,6 @@
 #include <stdbool.h>
 #include "czmq.h"
 
-//#define _DEBUG 1
 #define NOTUSED(V) ((void) V)
 #define MAX_LINE 1024
 

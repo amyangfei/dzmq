@@ -16,13 +16,25 @@ static const char alphanum[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "abcdefghijklmnopqrstuvwxyz";
 
+static void delete_bindinfo(bind_info *binfo) {
+    free(binfo->bind_addr);
+    free(binfo);
+}
+
 void dz_broker_sim_client(dz_broker *self, int client_num, int verbose) {
     for (int i = 0; i < client_num; i++) {
         const char *addr = dz_broker_get_name(self);
-        bind_info binfo = {i, addr, verbose};
+        /*bind_info binfo = {i, addr, verbose};*/
+
+        bind_info *binfo = (bind_info *) zmalloc(sizeof(bind_info));
+        binfo->nbr_id = i;
+        binfo->bind_addr = strdup(addr);
+        binfo->verbose = verbose;
+
         // TODO: a strange segmentation fault bug
+        // done
         /*zthread_new(client_task_mdp, &binfo);*/
-        zthread_new(client_task_sync_test, &binfo);
+        zthread_new(client_task_sync_test, binfo);
         /*zthread_new(client_task_async_test, &binfo);*/
     }
 }
@@ -30,10 +42,11 @@ void dz_broker_sim_client(dz_broker *self, int client_num, int verbose) {
 void dz_broker_sim_worker(dz_broker *self, int worker_num, int verbose) {
     for (int i = 0; i < worker_num; i++) {
         const char *addr = dz_broker_get_name(self);
-        bind_info binfo = {i, addr, verbose};
-        // TODO: a strange segmentation fault bug
-        /*bind_info binfo = {i, self->name, verbose};*/
-        zthread_new(worker_task_mdp, &binfo);
+        bind_info *binfo = (bind_info *) zmalloc(sizeof(bind_info));
+        binfo->nbr_id = i;
+        binfo->bind_addr = strdup(addr);
+        binfo->verbose = verbose;
+        zthread_new(worker_task_mdp, binfo);
     }
 }
 
@@ -72,7 +85,6 @@ static void *client_task_mdp (void *args) {
                 printf("total:%d, success:%d, fail:%d\n", total, success, fail);
                 break;
             } else {
-                /*zmsg_log_dump(reply, "client recv back:):):):):)");*/
                 zframe_t *data = zmsg_first(reply);
                 if (strcmp(task_id, zframe_strdup(data)) == 0) {
                     __sync_fetch_and_add(&success, 1);
@@ -80,7 +92,6 @@ static void *client_task_mdp (void *args) {
                     /*zmsg_log_dump(reply, "client recv back success");*/
                 } else {
                     __sync_fetch_and_add(&fail, 1);
-                    printf("%s------%s\n", task_id, zframe_strdup(data));
                     printf("total:%d, success:%d, fail:%d, lost:%d\n", total, success, fail, lost);
                     zmsg_log_dump(reply, "client recv back fail");
                 }
@@ -218,7 +229,6 @@ static void *client_task_sync_test (void *args) {
                 this_reply_type = r_lost;
                 break;
             } else {
-                /*zmsg_log_dump(reply, "client recv back:):):):):)");*/
                 zframe_t *data = zmsg_first(reply);
                 if (strcmp(task_id, zframe_strdup(data)) == 0) {
                     __sync_fetch_and_add(&success, 1);
@@ -228,7 +238,6 @@ static void *client_task_sync_test (void *args) {
                 } else {
                     __sync_fetch_and_add(&fail, 1);
                     this_reply_type = r_fail;
-                    /*printf("%s------%s\n", task_id, zframe_strdup(data));*/
                     /*printf("total:%d, success:%d, fail:%d, lost:%d\n", total, success, fail, lost);*/
                     /*zmsg_log_dump(reply, "client recv back fail");*/
                 }

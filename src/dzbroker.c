@@ -16,8 +16,13 @@
 struct _dz_broker {
     zctx_t *ctx;            // Context
     const char *name;       // Broker name
-    char **remote;          // Remote brokers' name
-    int rlen;               // number of remote brokers
+
+    int peers_num;          // active peers' number
+    char **peers_avail;     // available peers' name
+    int peers_avail_num;    // available peers' number
+    int peers_avail_cap;    // available peers' capacity
+    zhash_t *peers_info;    // active peers' information
+
     void *localfe;
     void *localbe;
     void *cloudfe;
@@ -38,24 +43,24 @@ struct _dz_broker {
     uint64_t heartbeat_at;  // When to send HEARTBEAT
 };
 
-static void
-    s_broker_worker_msg (dz_broker *self, zmsg_t *msg, bool from_local);
-static void
-    s_broker_client_msg (dz_broker *self, zmsg_t *msg, bool from_local);
-static void
-    s_broker_purge (dz_broker *self);
+static void s_broker_worker_msg (dz_broker *self, zmsg_t *msg, bool from_local);
+static void s_broker_client_msg (dz_broker *self, zmsg_t *msg, bool from_local);
+static void s_broker_purge (dz_broker *self);
+static void status_timer_task(void *args, zctx_t *ctx, void *pipe);
+static void add_active_peer (dz_broker *self, const char *peer_name);
 #ifndef _HAVE_TIMERFD
-static void
-    timer_thread(void *args, zctx_t *ctx, void *pipe);
+static void timer_thread(void *args, zctx_t *ctx, void *pipe);
 #endif
 
 
 dz_broker *dz_broker_new(const char *local, char **remote, int rlen) {
     dz_broker *self = (dz_broker *) zmalloc(sizeof(dz_broker));
     self->name = local;
-    self->remote = (char **)malloc(sizeof(char *) * rlen);
-    memcpy(self->remote, remote, rlen * sizeof(char *));
-    self->rlen = rlen;
+    self->peers_num = rlen;
+    self->peers_avail = (char **) malloc (rlen * sizeof(char *));
+    self->peers_avail_num = 0;
+    self->peers_avail_cap = rlen;
+    self->peers_info = zhash_new();
     self->ctx = zctx_new();
 
     self->localfe = zsocket_new(self->ctx, ZMQ_ROUTER);
@@ -66,7 +71,6 @@ dz_broker *dz_broker_new(const char *local, char **remote, int rlen) {
 
     self->cloudfe = zsocket_new(self->ctx, ZMQ_ROUTER);
     zsocket_set_identity(self->cloudfe, local);
-    /*zsocket_bind(self->cloudfe, "ipc://%s-cloud.ipc", local);*/
     char node_cloudfe[MAX_LINE] = "";
     snprintf(node_cloudfe, MAX_LINE, "%s-cloudfe", local);
     char *cloudfe_endpoint = (char *)zhash_lookup(settings.nodes, node_cloudfe);
@@ -75,11 +79,13 @@ dz_broker *dz_broker_new(const char *local, char **remote, int rlen) {
     self->cloudbe = zsocket_new(self->ctx, ZMQ_ROUTER);
     zsocket_set_identity(self->cloudbe, local);
     for (int i = 0; i < rlen; i++) {
-        char *peer = remote[i];
-        snprintf(node_cloudfe, MAX_LINE, "%s-cloudfe", peer);
+        broker_info *p_info = (broker_info *) zmalloc(sizeof(broker_info));
+        p_info->name = strdup(remote[i]);
+        p_info->capacity = 0;
+        zhash_insert(self->peers_info, remote[i], p_info);
+        snprintf(node_cloudfe, MAX_LINE, "%s-cloudfe", remote[i]);
         cloudfe_endpoint = (char *)zhash_lookup(settings.nodes, node_cloudfe);
-        LOG_PRINT(LOG_INFO, "I: connecting to cloud frontend at '%s %s'\n", peer, cloudfe_endpoint);
-        /*zsocket_connect(self->cloudbe, "ipc://%s-cloud.ipc", peer);*/
+        LOG_PRINT(LOG_INFO, "I: connecting to cloud frontend at '%s %s'\n", remote[i], cloudfe_endpoint);
         zsocket_connect(self->cloudbe, "tcp://%s", cloudfe_endpoint);
     }
 
@@ -87,17 +93,14 @@ dz_broker *dz_broker_new(const char *local, char **remote, int rlen) {
     char node_statebe[MAX_LINE] = "";
     snprintf(node_statebe, MAX_LINE, "%s-statebe", local);
     char *statebe_endpoint = (char *)zhash_lookup(settings.nodes, node_statebe);
-    /*zsocket_bind(self->statebe, "ipc://%s-state.ipc", local);*/
     zsocket_bind(self->statebe, "tcp://%s", statebe_endpoint);
 
     self->statefe = zsocket_new(self->ctx, ZMQ_SUB);
     zsocket_set_subscribe(self->statefe, "");
     for (int i = 0; i < rlen; i++) {
-        char *peer = remote[i];
-        snprintf(node_statebe, MAX_LINE, "%s-statebe", peer);
+        snprintf(node_statebe, MAX_LINE, "%s-statebe", remote[i]);
         statebe_endpoint = (char *)zhash_lookup(settings.nodes, node_statebe);
-        LOG_PRINT(LOG_INFO, "I: connecting to state backend at '%s', %s\n", peer, statebe_endpoint);
-        /*zsocket_connect(self->statefe, "ipc://%s-state.ipc", peer);*/
+        LOG_PRINT(LOG_INFO, "I: connecting to state backend at '%s', %s\n", remote[i], statebe_endpoint);
         zsocket_connect(self->statefe, "tcp://%s", statebe_endpoint);
     }
 
@@ -130,7 +133,11 @@ void dz_broker_destory(dz_broker **self_p) {
         zhash_destroy(&self->services);
         zhash_destroy(&self->workers_hash);
         zlist_destroy(&self->waiting);
-        free(self->remote);
+        for (int i= 0; i < self->peers_avail_num; ++i) {
+            free(self->peers_avail[i]);
+        }
+        free(self->peers_avail);
+        zhash_destroy(&self->peers_info);
         free(self);
         *self_p = NULL;
     }
@@ -245,8 +252,23 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
             zframe_t *client = zmsg_unwrap (msg);
             zframe_t *peer_name = zmsg_pop(msg);
 
-            char *data = (char *) zframe_data (peer_name);
+            /*char *data = (char *) zframe_data (peer_name);*/
+            /*size_t size = zframe_size (peer_name);*/
+            char *data = zframe_strdup(peer_name);
             //  Route reply to cloud if it's addressed to a broker
+            // TODO: validation
+            if (zhash_lookup(self->peers_info, data) != NULL) {
+                zmsg_pushstr (msg, MDPW_REPORT_CLOUD);
+                zmsg_pushstr (msg, MDPW_WORKER);
+                zmsg_wrap (msg, client);
+                zmsg_push(msg, peer_name);
+
+                zmsg_send (&msg, self->cloudfe);
+            } else {
+                LOG_PRINT(LOG_ERROR, "wrong message frame to peer:%s", data);
+            }
+            free(data);
+            /**
             for (int i = 0; msg && i < self->rlen; i++) {
                 size_t size = zframe_size (peer_name);
                 if (size == strlen(self->remote[i]) &&  memcmp (data, self->remote[i], size) == 0) {
@@ -257,8 +279,7 @@ void s_broker_worker_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
 
                     zmsg_send (&msg, self->cloudfe);
                 }
-            }
-
+            } */
         }
         else {
             // msg: service data
@@ -326,22 +347,26 @@ static void s_broker_client_msg(dz_broker *self, zmsg_t *msg, bool from_local) {
         zframe_destroy(&empty);
         zframe_destroy(&header);
 
-        //  Route to random broker peer
-        int peer = randof(self->rlen);
-
         zmsg_wrap(msg, sender);
         zmsg_pushstr(msg, self->name);
-        /*zmsg_pushmem (msg, self->remote[peer], strlen(self->remote[peer]));*/
-        /*zmsg_pushmem (msg, self->name, strlen(self->name));*/
         zmsg_push(msg, service);
         zmsg_pushstr(msg, MDPC_REPOST);
         zmsg_pushstr(msg, MDPC_CLIENT);
 
+        //  Route to random broker peer
+        // TODO: validation
+        /**
+        int peer = randof(self->rlen);
         zmsg_pushmem (msg, self->remote[peer], strlen(self->remote[peer]));
+        zmsg_log_dump(msg, "Route msg");
+        */
+        int peer = randof(self->peers_avail_num);
+        zmsg_pushmem (msg, self->peers_avail[peer], strlen(self->peers_avail[peer]));
         zmsg_log_dump(msg, "Route msg");
 
         zmsg_send (&msg, self->cloudbe);
-        LOG_PRINT(LOG_DEBUG, "Route to random broker peer %s", self->remote[peer]);
+        /*LOG_PRINT(LOG_DEBUG, "Route to random broker peer %s", self->remote[peer]);*/
+        LOG_PRINT(LOG_DEBUG, "Route to random broker peer %s", self->peers_avail[peer]);
     }
 
     /**
@@ -430,16 +455,16 @@ void dz_broker_main_loop_mdp(dz_broker *self) {
             }
             s_broker_client_msg(self, msg, from_local);
         }
-        //  We broadcast capacity messages to other peers; to reduce chatter,
-        //  we do this only if our capacity changed.
 
-        printf("dzbroker-%s local_capacity = %d\n", self->name, self->local_capacity);
+        /*printf("dzbroker-%s local_capacity = %d\n", self->name, self->local_capacity);*/
+        /**
         if (self->local_capacity != previous) {
             //  We stick our own identity onto the envelope
             zstr_sendm(self->statebe, self->name);
             //  Broadcast new capacity
             zstr_sendf(self->statebe, "%d", self->local_capacity);
         }
+        */
     }
 }
 
@@ -449,6 +474,39 @@ static void status_timer_task(void *args, zctx_t *ctx, void *pipe) {
     while (true) {
         sleep(BROADCAST_INTERVAL);
         zstr_send(pipe, "status_timer timeout");
+    }
+}
+
+static void add_active_peer (dz_broker *self, const char *peer_name) {
+    if (self->peers_avail_num == self->peers_avail_cap) {
+        char **new_peers_avail =
+            (char **) realloc(self->peers_avail, 2 * self->peers_avail_cap * sizeof(char *));
+        self->peers_avail = new_peers_avail;
+        self->peers_avail_cap *= 2;
+    }
+    self->peers_avail[self->peers_avail_num++] = strdup(peer_name);
+    LOG_PRINT(LOG_DEBUG, "broker-%s, peer-%s", self->name, peer_name);
+}
+
+static void remove_active_peer (dz_broker *self, const char *peer_name) {
+    size_t size = strlen(peer_name);
+    for (int i = 0; i < self->peers_avail_num; ++i) {
+        if (strlen(self->peers_avail[i]) == size
+                && memcmp(self->peers_avail[i], peer_name, size) == 0)
+        {
+            if (i == self->peers_avail_num - 1) {
+                free(self->peers_avail[i]);
+                self->peers_avail_num--;
+            } else {
+                free(self->peers_avail[i]);
+                int copy_len = strlen(self->peers_avail[self->peers_avail_num-1]);
+                self->peers_avail[i] = (char *) malloc(copy_len + 1);
+                strncpy(self->peers_avail[i], self->peers_avail[self->peers_avail_num-1], copy_len);
+                free(self->peers_avail[self->peers_avail_num--]);
+            }
+            LOG_PRINT(LOG_DEBUG, "broker-%s, peer-%s", self->name, peer_name);
+            break;
+        }
     }
 }
 
@@ -518,7 +576,25 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
         else if (poller_items[2].revents & ZMQ_POLLIN) {
             char *peer = zstr_recv(self->statefe);
             char *status = zstr_recv(self->statefe);
-            self->cloud_capacity = atoi(status);
+            broker_info *p_info = (broker_info *) zhash_lookup(self->peers_info, peer);
+            LOG_PRINT(LOG_DEBUG, "------->");
+            if (p_info == NULL) {
+                LOG_PRINT(LOG_ERROR, "receive status from wrong peer %s", peer);
+            } else {
+                int old_capacity = p_info->capacity;
+                p_info->capacity = atoi(status);
+                if (old_capacity != p_info->capacity) {
+                    zhash_update(self->peers_info, peer, p_info);
+                    self->cloud_capacity += (p_info->capacity - old_capacity);
+                }
+                if (old_capacity == 0 && p_info->capacity > 0) {
+                    add_active_peer(self, peer);
+                }
+                if (old_capacity > 0 && p_info->capacity == 0) {
+                    remove_active_peer(self, peer);
+                }
+                LOG_PRINT(LOG_DEBUG, "old-%d, new-%d", old_capacity, p_info->capacity);
+            }
             free(peer);
             free(status);
         }
@@ -530,11 +606,11 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
             if (s != sizeof(uint64_t)) {
                 LOG_PRINT(LOG_ERROR, "timerfd read error");
             }
-            LOG_PRINT(LOG_DEBUG, "use timerfd status timeout");
+            LOG_PRINT(LOG_DEBUG, "use timerfd status timeout, broker-%s, capacity-%d", self->name, self->cloud_capacity);
 #else
             char *status_timeout_str = zstr_recv(self->timer_sock);
             NOTUSED(status_timeout_str);
-            LOG_PRINT(LOG_DEBUG, "not use timerfd status timeout");
+            LOG_PRINT(LOG_DEBUG, "not use timerfd status timeout, broker-%s, capacity-%d", self->name, self->cloud_capacity);
 #endif
             zstr_sendm(self->statebe, self->name);
             zstr_sendf(self->statebe, "%d", self->local_capacity);

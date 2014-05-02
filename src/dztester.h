@@ -12,7 +12,7 @@
 
 typedef struct{
     int nbr_id;
-    const char *bind_addr;
+    char *bind_addr;
     int verbose;
 } bind_info;
 
