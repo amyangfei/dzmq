@@ -530,19 +530,21 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
 #else
     self->timer_sock = zthread_fork(self->ctx, status_timer_task, NULL);
 #endif
-    while (true) {
-        zmq_pollitem_t poller_items [] = {
-            { self->localbe, 0, ZMQ_POLLIN, 0 },
-            { self->cloudbe, 0, ZMQ_POLLIN, 0 },
-            { self->statefe, 0, ZMQ_POLLIN, 0 },
+
+    zmq_pollitem_t poller_items [] = {
+        { self->localbe, 0, ZMQ_POLLIN, 0 },
+        { self->cloudbe, 0, ZMQ_POLLIN, 0 },
+        { self->statefe, 0, ZMQ_POLLIN, 0 },
 #ifdef _HAVE_TIMERFD
-            { 0, self->timer_fd, ZMQ_POLLIN, 0 },
+        { 0, self->timer_fd, ZMQ_POLLIN, 0 },
 #else
-            { self->timer_sock, 0, ZMQ_POLLIN, 0 },
+        { self->timer_sock, 0, ZMQ_POLLIN, 0 },
 #endif
-            { self->localfe, 0, ZMQ_POLLIN, 0 },
-            { self->cloudfe, 0, ZMQ_POLLIN, 0 }
-        };
+        { self->localfe, 0, ZMQ_POLLIN, 0 },
+        { self->cloudfe, 0, ZMQ_POLLIN, 0 }
+    };
+
+    while (true) {
         int poller_num = 4;
         if (self->local_capacity > 0) {
             poller_num += 2;
@@ -556,28 +558,32 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
         zmsg_t *msg = NULL;
 
         if (poller_items[0].revents & ZMQ_POLLIN) {
-            msg = zmsg_recv(self->localbe);
-            if (!msg)
-                break;          //  Interrupted
-            s_broker_worker_msg(self, msg, true);
+            while (true) {
+                msg = zmsg_recv_nowait(self->localbe);
+                if (!msg)
+                    break;
+                s_broker_worker_msg(self, msg, true);
+            }
+            poller_items[0].revents = 0;
         }
+
         // Or handle reply from peer broker, in fact this msg only goes to localfe?
-        else if (poller_items[1].revents & ZMQ_POLLIN) {
+        if (poller_items[1].revents & ZMQ_POLLIN) {
             msg = zmsg_recv(self->cloudbe);
             if (!msg)
                 break;          //  Interrupted
             zframe_t *remote_name = zmsg_pop(msg);
             zframe_destroy(&remote_name);
             s_broker_worker_msg(self, msg, false);
+            poller_items[1].revents = 0;
         }
 
         //  If we have input messages on our statefe sockets, we can process these immediately:
         //  TODO: fix state handle for multi-connecting peers
-        else if (poller_items[2].revents & ZMQ_POLLIN) {
+        if (poller_items[2].revents & ZMQ_POLLIN) {
             char *peer = zstr_recv(self->statefe);
             char *status = zstr_recv(self->statefe);
             broker_info *p_info = (broker_info *) zhash_lookup(self->peers_info, peer);
-            LOG_PRINT(LOG_DEBUG, "------->");
             if (p_info == NULL) {
                 LOG_PRINT(LOG_ERROR, "receive status from wrong peer %s", peer);
             } else {
@@ -597,9 +603,10 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
             }
             free(peer);
             free(status);
+            poller_items[2].revents = 0;
         }
 
-        else if (poller_items[3].revents & ZMQ_POLLIN) {
+        if (poller_items[3].revents & ZMQ_POLLIN) {
 #ifdef _HAVE_TIMERFD
             uint64_t exp;
             ssize_t s = read(self->timer_fd, &exp, sizeof(uint64_t));
@@ -614,17 +621,24 @@ void dz_broker_main_loop_mdp2(dz_broker *self) {
 #endif
             zstr_sendm(self->statebe, self->name);
             zstr_sendf(self->statebe, "%d", self->local_capacity);
+            poller_items[3].revents = 0;
         }
 
-        else if (poller_items[4].revents & ZMQ_POLLIN) {
-            msg = zmsg_recv(self->localfe);
-            s_broker_client_msg(self, msg, true);
+        if (poller_items[4].revents & ZMQ_POLLIN) {
+            while (true) {
+                msg = zmsg_recv_nowait(self->localfe);
+                if (!msg)
+                    break;
+                s_broker_client_msg(self, msg, true);
+            }
+            poller_items[4].revents = 0;
         }
 
-        else if (poller_items[5].revents & ZMQ_POLLIN) {
+        if (poller_items[5].revents & ZMQ_POLLIN) {
             msg = zmsg_recv(self->cloudfe);
             s_broker_client_msg(self, msg, false);
             LOG_PRINT(LOG_DEBUG, "GET msg from broker peer");
+            poller_items[5].revents = 0;
         }
         // printf("dzbroker-%s local_capacity = %d\n", self->name, self->local_capacity);
     }
