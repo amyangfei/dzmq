@@ -8,3 +8,4 @@ tags
 *.dSYM
 *.ipc
 nodes.conf
+build/
