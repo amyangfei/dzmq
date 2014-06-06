@@ -3,13 +3,11 @@
 #include "dztester.h"
 #include "dzlog.h"
 #include "dzutil.h"
-#include "hiredis/hiredis.h"
 
 static void *client_task_mdp (void *args);
 static void *worker_task_mdp(void *args);
 static void *client_task_sync_test (void *args);
 static void *client_task_async_test (void *args);
-redisContext *get_redis_ctx();
 
 static const char alphanum[] =
         "0123456789"
@@ -103,24 +101,6 @@ static void *client_task_mdp (void *args) {
     return NULL;
 }
 
-redisContext *get_redis_ctx() {
-    redisContext *c;
-    const char *hostname = (char *)zhash_lookup(settings.nodes, "redis");
-    int port = atoi((char *)zhash_lookup(settings.nodes, "redis-port"));
-
-    struct timeval timeout = { 1, 500000 }; // 1.5 seconds
-    c = redisConnectWithTimeout(hostname, port, timeout);
-    if (c == NULL || c->err) {
-        if (c) {
-            printf("Connection error: %s\n", c->errstr);
-            redisFree(c);
-        } else {
-            printf("Connection error: can't allocate redis context\n");
-        }
-    }
-    return c;
-}
-
 static void *worker_task_mdp(void *args) {
     bind_info *binfo = (bind_info *)args;
     int worker_id = binfo->nbr_id;
@@ -132,8 +112,6 @@ static void *worker_task_mdp(void *args) {
     sprintf(endpoint, "ipc://%s-localbe.ipc", bind_addr);
     mdp_worker_t *mdp_worker = mdp_worker_new(endpoint, "echo", verbose);
 
-    /*redisContext *redis_client = get_redis_ctx();*/
-
     //  Process messages as they arrive
     while (true) {
         zframe_t *reply_to;
@@ -142,20 +120,6 @@ static void *worker_task_mdp(void *args) {
             break;              //  Worker was interrupted
 
         /*millisecond_sleep(0, randof(3) * 100);*/
-
-        /**
-        // store key-value pair to redis
-        zmsg_t *msg_dump = zmsg_dup(request);
-        zframe_t *command = zmsg_pop(msg_dump);
-        zframe_t *service = zmsg_pop(msg_dump);
-        char *set_k = zframe_strdup (zmsg_first (msg_dump));
-        char *set_v = zframe_strdup (zmsg_last (msg_dump));
-        redisReply *reply = (redisReply *)redisCommand(redis_client, "SET %s %s", set_k, set_v);
-        zframe_destroy(&command);
-        zframe_destroy(&service);
-        zmsg_destroy(&msg_dump);
-        freeReplyObject(reply);
-        */
 
         mdp_worker_send (mdp_worker, &request, reply_to);
         LOG_PRINT(LOG_DEBUG, "worker-%d done and send back", worker_id);
