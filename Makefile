@@ -1,12 +1,13 @@
 PREFIX=/usr/local/dzmq
+BASE=$(shell pwd)
+BUILD_SLASH="${BASE}/build/"
+TARGET="${BASE}/build/target"
 
 all:
-	mkdir -p build/target
-	cd build/target; cmake $(PWD)/src; make; mv dzmq $(PWD)/build/dzmq
+	mkdir -p ${TARGET}; cd ${TARGET}; cmake $(PWD)/src; make
 
 debug:
-	mkdir -p build/target
-	cd build/target; cmake -DDEFINE_DEBUG=ON $(PWD)/src; make; mv dzmq $(PWD)/build/dzmq
+	mkdir -p ${TARGET}; cd ${TARGET}; cmake -DDEFINE_DEBUG=ON $(PWD)/src; make
 
 clean:
 	rm -rf build

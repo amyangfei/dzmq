@@ -101,6 +101,7 @@ void test_broker(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    printf("this is from dzmq-server.c\n");
     struct sigaction sa;
     memset(&sa, 0, sizeof(struct sigaction));
     sigemptyset(&sa.sa_mask);
