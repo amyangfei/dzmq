@@ -35,8 +35,7 @@ set(DZMQ_EXTERNAL_LIBS
     ${LIBCZMQ_LIBRARY}
 )
 
-aux_source_directory (${PROJECT_SOURCE_DIR} DZMQ_SOURCES)
-set (SOURCES ${DZMQ_SOURCES})
+# aux_source_directory (${PROJECT_SOURCE_DIR} DZMQ_SOURCES)
 
 OPTION(DEFINE_DEBUG
   "Build the project using debugging code"
@@ -55,6 +54,18 @@ message("Std CFLAGS: ${CMAKE_C_FLAGS}")
 
 set(CMAKE_EXE_LINKER_FLAGS "-L/usr/lib -L/usr/local/lib")
 
-add_executable(dzmq ${SOURCES})
-target_link_libraries(dzmq ${DZMQ_EXTERNAL_LIBS})
+file(GLOB LIB_SOURCES *.c)
+file(GLOB LIB_HEADERS *.h)
+list(REMOVE_ITEM LIB_SOURCES "${PROJECT_SOURCE_DIR}/dzmq-benchmark.c")
+list(REMOVE_ITEM LIB_SOURCES "${PROJECT_SOURCE_DIR}/dzmq-server.c")
+add_library(dzmq ${LIB_SOURCES} ${LIB_HEADERS})
 
+file(GLOB MAIN_SOURCES dzmq-benchmark.c dzmq-server.c)
+
+foreach(main_source ${MAIN_SOURCES})
+    string(REPLACE ".c" "" main_source_path ${main_source})
+    get_filename_component(main_source_name ${main_source_path} NAME)
+    add_executable(${main_source_name} ${main_source})
+    target_link_libraries(${main_source_name} dzmq)
+    target_link_libraries(${main_source_name} ${DZMQ_EXTERNAL_LIBS})
+endforeach(main_source ${MAIN_SOURCES})
